@@ -10,10 +10,12 @@ import json
 from models import BlogState, CritiqueDecision
 from utils import get_last_critique_structured, parse_critique_entry
 
-
 load_dotenv()
 
-MAX_REVISIONS = 25
+import os
+MAX_REVISIONS = int(os.getenv("MAX_REVISIONS"))
+
+# MAX_REVISIONS = 25
 
 llm = ChatGoogleGenerativeAI(
     model = "gemini-2.5-flash"
@@ -78,20 +80,21 @@ def evaluate_draft(state: BlogState) -> BlogState:
         "blog_content": state["blog_content"]
     })
     
-    critique_update = {
-        "decision": critique_result.decision,
-        "summary": critique_result.critique_summary,
-        "feedback": critique_result.specific_feedback,
-        "quality_score": critique_result.quality_score,
-        "revision_count": state["revision_count"]
-    }
+    critique_update = critique_result.model_dump()
+    critique_update["revision_count"] = state["revision_count"]
+    
+    # print(critique_update)
     
     return {
         "critique_decision": critique_result.decision,
-        # "critique_history": [AIMessage(content=json.dumps(critique_update)), critique_update],
         "critique_history": [AIMessage(content=json.dumps(critique_update))],
         "revision_count": state["revision_count"],
         "quality_score": critique_result.quality_score,
+    }
+    
+def update_revision(state: BlogState) -> BlogState:
+    return {
+        "revision_count": len(state["critique_history"])
     }
     
 
@@ -99,7 +102,8 @@ def evaluate_draft(state: BlogState) -> BlogState:
 def revise_draft(state: BlogState) -> BlogState:
     print("--- ENHANCER: Revising Draft ---")
     latest_critique_dict = get_last_critique_structured(state["critique_history"])
-    latest_critique = latest_critique_dict.get("feedback", [])
+    # print(latest_critique_dict)
+    latest_critique = latest_critique_dict.get("specific_feedback", [])
     feedback_text = "\n- " + "\n- ".join(latest_critique)
     
     prompt_template = ChatPromptTemplate.from_messages([
@@ -124,7 +128,7 @@ def revise_draft(state: BlogState) -> BlogState:
     
     return {
         "blog_content": response.content,
-        "revision_count": state["revision_count"] + 1
+        # "revision_count": state["revision_count"] + 1
     }
 
 
@@ -156,12 +160,13 @@ def build_graph():
     workflow.add_node("generator", action=generate_draft)
     workflow.add_node("evaluate_draft", action=evaluate_draft)
     workflow.add_node("revise_draft", action=revise_draft)
+    workflow.add_node("update_revision", action=update_revision)
     
     workflow.add_edge(START, "generator")
     workflow.add_edge("generator", "evaluate_draft")
-    
+    workflow.add_edge("evaluate_draft", "update_revision")
     workflow.add_conditional_edges(
-        "evaluate_draft",
+        "update_revision",
         should_continue,
         {
             "revise_draft": "revise_draft",

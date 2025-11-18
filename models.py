@@ -12,6 +12,7 @@ class BlogState(TypedDict):
     revision_count: int
     quality_score: float
     
+    
 class CritiqueDecision(BaseModel):
     """The structured output schema the Criticizer must return."""
     decision: Literal["REVISE", "PASS"] = Field(

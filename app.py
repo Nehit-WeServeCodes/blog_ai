@@ -1,36 +1,44 @@
 import streamlit as st
 from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
 
-from graph_builder import build_graph, MAX_REVISIONS
+from graph_builder import build_graph
 from models import BlogState
 from utils import get_last_critique_structured, parse_critique_entry
-from tavily import TavilyClient
 from dotenv import load_dotenv
+from langchain_tavily import TavilySearch
 
-import os
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 load_dotenv()
 
-tavily = TavilyClient(api_key=TAVILY_API_KEY)
+import os
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+MAX_REVISIONS = int(os.getenv("MAX_REVISIONS"))
 
-def search_for_blog(user_prompt, client: TavilyClient):
+try:
+    if TAVILY_API_KEY:
+        tavily_search_tool = TavilySearch(max_results = 5)
+        st.session_state.tavily_search = True
+    else:
+        st.session_state.tavily_search = False
+        st.warning("Tavily API Key not found. Blog search will be skipped.")
+except Exception as e:
+    st.error(f"Failed to initialize Tavily Search Tool: {e}")
+    st.session_state.tavily_search = False
+    
+def search_for_blog(user_prompt, search_tool: TavilySearch):
     search_query = f"{user_prompt} blog post"
+    
+    results = search_tool.invoke({"query": search_query})
+    # print(results)
+    # print(results['results'])
+    
+    if not results or len(results) == 0:
+        return "> *No highly relevant blogs found for this topic."
+    
+    formatted_output = "### 📚 Found Existing Blogs:\n"
+    
     try:
-        response = client.search(
-            query=search_query,
-            search_depth="basic",
-            max_results=5
-        )
-        
-        results = response.get('results', [])
-        
-        if not results:
-            return "> *No highly relevant blogs found for this topic.*"
-        
-        formatted_output = "### 📚 Found Existing Blogs:\n"
-        
-        for i, res in enumerate(results):
+        for i, res in enumerate(results["results"]):
             title = res.get('title', 'No Title')
             url = res.get('url', '#')
             snippet = res.get('content', 'No description available.')
@@ -60,9 +68,10 @@ init_session_state()
 def start_blog_generation(user_prompt):
     """Callback function"""
     st.subheader("Contextual Search Results")
-    with st.spinner("Searching the web for existing blogs..."):
-        search_output = search_for_blog(user_prompt=user_prompt, client=tavily)
-        st.markdown(search_output)
+    if st.session_state.tavily_search:
+        with st.spinner("Searching the web for existing blogs..."):
+            search_output = search_for_blog(user_prompt=user_prompt, search_tool=tavily_search_tool)
+            st.markdown(search_output)
     
     st.divider()
     
@@ -78,8 +87,9 @@ def start_blog_generation(user_prompt):
         "user_prompt": user_prompt,
         "blog_content": "",
         "critique_history": [],
-        "revision_count": 0,
-        "critique_decision": "REVISE"
+        "revision_count": 1,
+        "critique_decision": "REVISE",
+        "quality_score": 0.0
         
     }
     
@@ -152,8 +162,8 @@ if st.session_state.final_content:
                 status = "STOPPED (MAX REVISIONS)"
                 
             st.markdown(f"**Iteration {i+1}: Status: {status} | Score: {score}/100**")
-            st.markdown(f"**Summary:**{critique_data.get('summary')}")
-            feedback_list = critique_data.get("feedback")
+            st.markdown(f"**Summary** {critique_data.get('critique_summary')}")
+            feedback_list = critique_data.get("specific_feedback")
             if feedback_list:
                 st.markdown("**Specific Feedback**")
                 for fb in feedback_list:

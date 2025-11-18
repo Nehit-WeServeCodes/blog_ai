@@ -11,7 +11,7 @@ def parse_critique_entry(entry):
     """Safely convert AIMessage or string to dict."""
     if isinstance(entry, dict):
         return entry
-    if isinstance(entry, AIMessage):
+    elif isinstance(entry, AIMessage):
         text = entry.content
     else:
         text = str(entry)
@@ -28,7 +28,7 @@ def get_last_critique_structured(history):
     for item in reversed(history):
         if isinstance(item, dict):
             return item
-        if isinstance(item, AIMessage):
+        elif isinstance(item, AIMessage):
             parsed = parse_critique_entry(item)
             if isinstance(parsed, dict):
                 return parsed
